@@ -1,4 +1,8 @@
 (fp_lib_table
   (lib (name TeensyFootprints)(type KiCad)(uri ${KIPRJMOD}/Library/Teensy/TeensyFootprints)(options "")(descr ""))
   (lib (name dmcginnis427Footprints)(type KiCad)(uri ${KIPRJMOD}/Library/dmcginnis427Footprints)(options "")(descr ""))
+  (lib (name IRM-20-5)(type KiCad)(uri ${KIPRJMOD}/Library/IRM-20-5)(options "")(descr ""))
+  (lib (name MCP1700-3302E_TO)(type KiCad)(uri ${KIPRJMOD}/Library/MCP1700-3302E_TO)(options "")(descr ""))
+  (lib (name 1N4148WS)(type KiCad)(uri ${KIPRJMOD}/Library/1N4148WS)(options "")(descr ""))
+  (lib (name MAX31855KASA_)(type KiCad)(uri ${KIPRJMOD}/Library/MAX31855KASA_)(options "")(descr ""))
 )

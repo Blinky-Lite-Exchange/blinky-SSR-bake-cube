@@ -1,1 +1,1 @@
-# blinky-lite-basic-cube
+# blinky-SSR-cube

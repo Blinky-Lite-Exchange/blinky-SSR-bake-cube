@@ -1,5 +1,8 @@
 (sym_lib_table
   (lib (name dmcginnis427)(type Legacy)(uri ${KIPRJMOD}/Library/dmcginnis427Symbols/dmcginnis427.lib)(options "")(descr ""))
   (lib (name teensy)(type Legacy)(uri ${KIPRJMOD}/Library/Teensy/symbols/teensy.lib)(options "")(descr ""))
-  (lib (name blinky-lite-basic-rescue)(type Legacy)(uri ${KIPRJMOD}/blinky-lite-basic-rescue.lib)(options "")(descr ""))
+  (lib (name IRM-20-5)(type Legacy)(uri ${KIPRJMOD}/Library/IRM-20-5/IRM-20-5.lib)(options "")(descr ""))
+  (lib (name MCP1700-3302E_TO)(type Legacy)(uri ${KIPRJMOD}/Library/MCP1700-3302E_TO/MCP1700-3302E_TO.lib)(options "")(descr ""))
+  (lib (name 1N4148WS)(type Legacy)(uri ${KIPRJMOD}/Library/1N4148WS/1N4148WS.lib)(options "")(descr ""))
+  (lib (name MAX31855KASA_)(type Legacy)(uri ${KIPRJMOD}/Library/MAX31855KASA_/MAX31855KASA_.lib)(options "")(descr ""))
 )
