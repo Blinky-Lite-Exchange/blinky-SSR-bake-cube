@@ -3,7 +3,7 @@
 #define CS0Pin 10
 #define ssrOnPin 17
 #define ssrOnLed 16
-#define CHECKSUM 28
+#define CHECKSUM 36
 #define LINE_PERIOD 20
 
 struct TransmitData
@@ -20,9 +20,12 @@ struct ReceiveData
   float targetTemp = 20.0;
   float propK = 0.01;
   float intK = 100.0;
+  float dutyFactorSet = 0.0;
+  float numTempSamples = 1.0;
   int checkSum = CHECKSUM;
 };
 SPISettings spiSettings(16000000, MSBFIRST, SPI_MODE1); 
+boolean resetTempMeas = true;
 
 void setupPins()
 {
@@ -32,19 +35,27 @@ void setupPins()
   digitalWrite (ssrOnPin, LOW);
   digitalWrite (ssrOnLed, LOW);
   digitalWrite (CS0Pin, HIGH);
+  resetTempMeas = true;
+
   SPI.begin();
 }
 void processNewSetting(TransmitData* tData, ReceiveData* rData, ReceiveData* newData)
 {
-  rData->checkSum      = newData->checkSum;
-  rData->propK         = newData->propK;
-  rData->targetTemp    = newData->targetTemp;
-  rData->intK          = newData->intK;
-  rData->num50HzCycles = newData->num50HzCycles;
+  rData->checkSum       = newData->checkSum;
+  rData->propK          = newData->propK;
+  rData->targetTemp     = newData->targetTemp;
+  rData->intK           = newData->intK;
+  rData->num50HzCycles  = newData->num50HzCycles;
+  rData->dutyFactorSet  = newData->dutyFactorSet;
   if (newData->regState != rData->regState)
   {
     tData->avgDutyFactor = 0.0;
     rData->regState      = newData->regState;
+  }
+  if (newData->numTempSamples != rData->numTempSamples)
+  {
+    resetTempMeas = true;
+    rData->numTempSamples      = newData->numTempSamples;
   }
 }
 boolean processData(TransmitData* tData, ReceiveData* rData)
@@ -52,7 +63,18 @@ boolean processData(TransmitData* tData, ReceiveData* rData)
   float errorTemp;
   float milliOn;
   float milliOff;
-  tData->temp = readTemp();
+  float sampleTemp = 0.0;
+  
+  sampleTemp = readTemp();
+  if (resetTempMeas)
+  {
+    resetTempMeas = false;
+    tData->temp = sampleTemp;
+  }
+  else
+  {
+    tData->temp = tData->temp + (sampleTemp - tData->temp) / rData->numTempSamples;
+  }
   
   if (rData->regState == 0)
   {
@@ -60,27 +82,29 @@ boolean processData(TransmitData* tData, ReceiveData* rData)
     digitalWrite (ssrOnLed, LOW);
     tData->avgDutyFactor = 0.0;
     tData->dutyFactor = 0.0;
-    delay(2000);
-    return true;
+  }
+  if (rData->regState == 1)
+  {
+    errorTemp = rData->targetTemp - tData->temp;
+    tData->avgDutyFactor = tData->avgDutyFactor + 0.001 * rData->intK * rData->num50HzCycles * LINE_PERIOD * errorTemp / 6000.0;
+    tData->dutyFactor = 0.01 * rData->propK * errorTemp + tData->avgDutyFactor;
+    if (tData->dutyFactor < 0.0) tData->dutyFactor = 0.0;
+    if (tData->dutyFactor > 1.0) tData->dutyFactor = 1.0;
   }
   if (rData->regState == 2)
   {
     digitalWrite (ssrOnPin, HIGH);
     digitalWrite (ssrOnLed, HIGH);
-    tData->avgDutyFactor = 1.0;
-    tData->dutyFactor = 1.0;
-    delay(2000);
-    return true;
+    tData->dutyFactor = rData->dutyFactorSet * 0.01;
+    tData->avgDutyFactor = tData->dutyFactor;
   }
-  errorTemp = rData->targetTemp - tData->temp;
-  tData->avgDutyFactor = tData->avgDutyFactor + 0.001 * rData->intK * rData->num50HzCycles * LINE_PERIOD * errorTemp / 6000.0;
-  tData->dutyFactor = 0.01 * rData->propK * errorTemp + tData->avgDutyFactor;
-  if (tData->dutyFactor < 0.0) tData->dutyFactor = 0.0;
-  if (tData->dutyFactor > 1.0) tData->dutyFactor = 1.0;
   milliOn = tData->dutyFactor * LINE_PERIOD * rData->num50HzCycles;
   milliOff = (1.0 - tData->dutyFactor) * LINE_PERIOD * rData->num50HzCycles;
-  digitalWrite (ssrOnPin, HIGH);
-  digitalWrite (ssrOnLed, HIGH);
+  if (milliOn > (LINE_PERIOD * 0.2))
+  {
+    digitalWrite (ssrOnPin, HIGH);
+    digitalWrite (ssrOnLed, HIGH);
+  }
   delay((unsigned long) milliOn);
   digitalWrite (ssrOnPin, LOW);
   digitalWrite (ssrOnLed, LOW);
