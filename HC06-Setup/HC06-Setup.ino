@@ -2,7 +2,7 @@
 String at = "AT";
 String deviceName = "AT+NAMESB01";
 String password = "AT+PIN5822";
-String baudRate = "AT+BAUD8";
+String baudRate = "AT+BAUD7";
 // Command Reference
 // http://www.martyncurrey.com/hc-06-hc01-comv2-0/
 /*
@@ -21,7 +21,7 @@ char commandChar[32];
 void setup()
 {
   Serial.begin(9600);
-  Serial1.begin(115200);
+  Serial1.begin(57600);
   sendATCommand(at); 
 //  sendATCommand(deviceName);
 //  sendATCommand(password);

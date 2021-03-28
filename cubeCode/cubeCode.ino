@@ -1,9 +1,9 @@
 #include <SPI.h> 
-#define BAUD_RATE 115200
+#define BAUD_RATE 57600
 #define CS0Pin 10
 #define ssrOnPin 17
 #define ssrOnLed 16
-#define CHECKSUM 36
+#define CHECKSUM 64
 #define LINE_PERIOD 20
 
 struct TransmitData
@@ -11,23 +11,23 @@ struct TransmitData
   float temp = -100.0;
   float dutyFactor = 0;
   float avgDutyFactor = 0.0;
-  int checkSum = CHECKSUM;
+  byte extraInfo[40];
 };
 struct ReceiveData
 {
   int regState = 0;
   float num50HzCycles = 100.0;
   float targetTemp = 20.0;
-  float propK = 0.01;
-  float intK = 100.0;
+  float propK = 1.0;
+  float intK = 2.0;
   float dutyFactorSet = 0.0;
-  float numTempSamples = 1.0;
-  int checkSum = CHECKSUM;
+  float numTempSamples = 4.0;
+  byte extraInfo[28];
 };
 SPISettings spiSettings(16000000, MSBFIRST, SPI_MODE1); 
 boolean resetTempMeas = true;
 
-void setupPins()
+void setupPins(TransmitData* tData, ReceiveData* rData)
 {
   pinMode (CS0Pin, OUTPUT);
   pinMode (ssrOnPin, OUTPUT);
@@ -36,12 +36,13 @@ void setupPins()
   digitalWrite (ssrOnLed, LOW);
   digitalWrite (CS0Pin, HIGH);
   resetTempMeas = true;
+  int sizeOfextraInfo = sizeof(tData->extraInfo);
+  for (int ii = 0; ii < sizeOfextraInfo; ++ii) tData->extraInfo[ii] = 0;
 
   SPI.begin();
 }
 void processNewSetting(TransmitData* tData, ReceiveData* rData, ReceiveData* newData)
 {
-  rData->checkSum       = newData->checkSum;
   rData->propK          = newData->propK;
   rData->targetTemp     = newData->targetTemp;
   rData->intK           = newData->intK;
@@ -66,14 +67,23 @@ boolean processData(TransmitData* tData, ReceiveData* rData)
   float sampleTemp = 0.0;
   
   sampleTemp = readTemp();
-  if (resetTempMeas)
+  if (sampleTemp > 2000.0)
   {
-    resetTempMeas = false;
+    resetTempMeas = true;
     tData->temp = sampleTemp;
+    rData->regState = 0;
   }
   else
   {
-    tData->temp = tData->temp + (sampleTemp - tData->temp) / rData->numTempSamples;
+    if (resetTempMeas)
+    {
+      resetTempMeas = false;
+      tData->temp = sampleTemp;
+    }
+    else
+    {
+      tData->temp = tData->temp + (sampleTemp - tData->temp) / rData->numTempSamples;
+    }
   }
   
   if (rData->regState == 0)
@@ -87,6 +97,8 @@ boolean processData(TransmitData* tData, ReceiveData* rData)
   {
     errorTemp = rData->targetTemp - tData->temp;
     tData->avgDutyFactor = tData->avgDutyFactor + 0.001 * rData->intK * rData->num50HzCycles * LINE_PERIOD * errorTemp / 6000.0;
+    if (tData->avgDutyFactor < 0.0) tData->avgDutyFactor = 0.0;
+    if (tData->avgDutyFactor > 1.0) tData->avgDutyFactor = 1.0;
     tData->dutyFactor = 0.01 * rData->propK * errorTemp + tData->avgDutyFactor;
     if (tData->dutyFactor < 0.0) tData->dutyFactor = 0.0;
     if (tData->dutyFactor > 1.0) tData->dutyFactor = 1.0;
@@ -153,10 +165,12 @@ struct TXinfo
 {
   int cubeInit = 1;
   int newSettingDone = 0;
+  int checkSum = CHECKSUM;
 };
 struct RXinfo
 {
   int newSetting = 0;
+  int checkSum = CHECKSUM;
 };
 
 struct TX
@@ -178,7 +192,7 @@ int sizeOfRx = 0;
 
 void setup()
 {
-  setupPins();
+  setupPins(&(tx.txData), &settingsStorage);
   pinMode(commLEDPin, OUTPUT);  
   digitalWrite(commLEDPin, commLED);
 
@@ -200,14 +214,31 @@ void loop()
       digitalWrite(commLEDPin, commLED);
       Serial1.readBytes((uint8_t*)&rx, sizeOfRx);
       
-      if (rx.rxInfo.newSetting > 0)
+      if (rx.rxInfo.checkSum == CHECKSUM)
       {
-        processNewSetting(&(tx.txData), &settingsStorage, &(rx.rxData));
-        tx.txInfo.newSettingDone = 1;
-        tx.txInfo.cubeInit = 0;
+        if (rx.rxInfo.newSetting > 0)
+        {
+          processNewSetting(&(tx.txData), &settingsStorage, &(rx.rxData));
+          tx.txInfo.newSettingDone = 1;
+          tx.txInfo.cubeInit = 0;
+        }
+      }
+      else
+      {
+        Serial1.end();
+        for (int ii = 0; ii < 50; ++ii)
+        {
+          commLED = !commLED;
+          digitalWrite(commLEDPin, commLED);
+          delay(100);
+        }
+
+        Serial1.begin(BAUD_RATE);
+        tx.txInfo.newSettingDone = 0;
+        tx.txInfo.cubeInit = -1;
       }
     }
     Serial1.write((uint8_t*)&tx, sizeOfTx);
+    Serial1.flush();
   }
-  
 }
