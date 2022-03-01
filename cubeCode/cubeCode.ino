@@ -1,33 +1,43 @@
+#include "BlinkyBus.h"
 #include <SPI.h> 
-#define BAUD_RATE 57600
+#define BAUD_RATE  19200
 #define CS0Pin 10
 #define ssrOnPin 17
 #define ssrOnLed 16
-#define CHECKSUM 64
 #define LINE_PERIOD 20
+#define commLEDPin    15
 
-struct TransmitData
+#define BLINKYBUSBUFSIZE  11
+union BlinkyBusUnion
 {
-  float temp = -100.0;
-  float dutyFactor = 0;
-  float avgDutyFactor = 0.0;
-  byte extraInfo[40];
-};
-struct ReceiveData
-{
-  int regState = 0;
-  float num50HzCycles = 100.0;
-  float targetTemp = 20.0;
-  float propK = 1.0;
-  float intK = 2.0;
-  float dutyFactorSet = 0.0;
-  float numTempSamples = 4.0;
-  byte extraInfo[28];
-};
+  struct
+  {
+    int16_t state;
+    int16_t regState;
+    int16_t num50HzCycles;
+    int16_t targetTemp10;
+    int16_t propK100;
+    int16_t intK100;
+    int16_t dutyFactorSet10;
+    int16_t numTempSamples;
+    int16_t temp10;
+    int16_t dutyFactor10;
+    int16_t avgDutyFactor10;
+  };
+  int16_t buffer[BLINKYBUSBUFSIZE];
+} bb;
+BlinkyBus blinkyBus(bb.buffer, BLINKYBUSBUFSIZE, Serial1, commLEDPin);
+
 SPISettings spiSettings(16000000, MSBFIRST, SPI_MODE1); 
 boolean resetTempMeas = true;
+int ipoll = 0;
+float ftemp = 0.0;
+float favgDutyFactor = 0.0;
+float fdutyFactor = 0.0;
+unsigned long tstart;
+unsigned long tnow;
 
-void setupPins(TransmitData* tData, ReceiveData* rData)
+void setup() 
 {
   pinMode (CS0Pin, OUTPUT);
   pinMode (ssrOnPin, OUTPUT);
@@ -36,31 +46,25 @@ void setupPins(TransmitData* tData, ReceiveData* rData)
   digitalWrite (ssrOnLed, LOW);
   digitalWrite (CS0Pin, HIGH);
   resetTempMeas = true;
-  int sizeOfextraInfo = sizeof(tData->extraInfo);
-  for (int ii = 0; ii < sizeOfextraInfo; ++ii) tData->extraInfo[ii] = 0;
-
   SPI.begin();
+  bb.regState = 0;
+  bb.num50HzCycles = 100;
+  bb.targetTemp10 = 250;
+  bb.propK100 = 200;
+  bb.intK100 = 100;
+  bb.dutyFactorSet10 = 50;
+  bb.numTempSamples = 4;
+  bb.dutyFactor10 = 0;
+  bb.avgDutyFactor10 = 0;
+
+  bb.state = 1; //init
+  Serial1.begin(BAUD_RATE);
+  blinkyBus.start();
 }
-void processNewSetting(TransmitData* tData, ReceiveData* rData, ReceiveData* newData)
+
+void loop() 
 {
-  rData->propK          = newData->propK;
-  rData->targetTemp     = newData->targetTemp;
-  rData->intK           = newData->intK;
-  rData->num50HzCycles  = newData->num50HzCycles;
-  rData->dutyFactorSet  = newData->dutyFactorSet;
-  if (newData->regState != rData->regState)
-  {
-    tData->avgDutyFactor = 0.0;
-    rData->regState      = newData->regState;
-  }
-  if (newData->numTempSamples != rData->numTempSamples)
-  {
-    resetTempMeas = true;
-    rData->numTempSamples      = newData->numTempSamples;
-  }
-}
-boolean processData(TransmitData* tData, ReceiveData* rData)
-{
+
   float errorTemp;
   float milliOn;
   float milliOff;
@@ -70,59 +74,85 @@ boolean processData(TransmitData* tData, ReceiveData* rData)
   if (sampleTemp > 2000.0)
   {
     resetTempMeas = true;
-    tData->temp = sampleTemp;
-    rData->regState = 0;
+    ftemp = sampleTemp;
+    bb.regState = 0;
   }
   else
   {
     if (resetTempMeas)
     {
       resetTempMeas = false;
-      tData->temp = sampleTemp;
+      ftemp = sampleTemp;
     }
     else
     {
-      tData->temp = tData->temp + (sampleTemp - tData->temp) / rData->numTempSamples;
+      ftemp = ftemp + (sampleTemp - ftemp) / ((float) bb.numTempSamples);
     }
   }
-  
-  if (rData->regState == 0)
+
+  if (bb.regState == 0)
   {
     digitalWrite (ssrOnPin, LOW);
     digitalWrite (ssrOnLed, LOW);
-    tData->avgDutyFactor = 0.0;
-    tData->dutyFactor = 0.0;
+    favgDutyFactor = 0;
+    fdutyFactor = 0;
   }
-  if (rData->regState == 1)
+  if (bb.regState == 1)
   {
-    errorTemp = rData->targetTemp - tData->temp;
-    tData->avgDutyFactor = tData->avgDutyFactor + 0.001 * rData->intK * rData->num50HzCycles * LINE_PERIOD * errorTemp / 6000.0;
-    if (tData->avgDutyFactor < 0.0) tData->avgDutyFactor = 0.0;
-    if (tData->avgDutyFactor > 1.0) tData->avgDutyFactor = 1.0;
-    tData->dutyFactor = 0.01 * rData->propK * errorTemp + tData->avgDutyFactor;
-    if (tData->dutyFactor < 0.0) tData->dutyFactor = 0.0;
-    if (tData->dutyFactor > 1.0) tData->dutyFactor = 1.0;
+    errorTemp = 0.1 * ((float) bb.targetTemp10) - ftemp;
+    favgDutyFactor = favgDutyFactor + 0.001 * 0.01 * ((float) bb.intK100) * ((float) bb.num50HzCycles) * LINE_PERIOD * errorTemp / 6000.0;
+    if (favgDutyFactor < 0.0) favgDutyFactor = 0.0;
+    if (favgDutyFactor > 1.0) favgDutyFactor = 1.0;
+    fdutyFactor = 0.01 * 0.01 * ((float) bb.propK100) * errorTemp + favgDutyFactor;
+    if (fdutyFactor < 0.0) fdutyFactor = 0.0;
+    if (fdutyFactor > 1.0) fdutyFactor = 1.0;
   }
-  if (rData->regState == 2)
+  if (bb.regState == 2)
   {
     digitalWrite (ssrOnPin, HIGH);
     digitalWrite (ssrOnLed, HIGH);
-    tData->dutyFactor = rData->dutyFactorSet * 0.01;
-    tData->avgDutyFactor = tData->dutyFactor;
+    fdutyFactor =  0.1 * ((float) bb.dutyFactorSet10) * 0.01;
+    favgDutyFactor = fdutyFactor;
   }
-  milliOn = tData->dutyFactor * LINE_PERIOD * rData->num50HzCycles;
-  milliOff = (1.0 - tData->dutyFactor) * LINE_PERIOD * rData->num50HzCycles;
+  bb.temp10 = (int16_t) (ftemp * 10);
+  bb.avgDutyFactor10 = (int16_t) (favgDutyFactor * 10);
+  bb.dutyFactor10 = (int16_t) (fdutyFactor * 10);
+  milliOn = fdutyFactor * LINE_PERIOD * ((float) bb.num50HzCycles);
+  milliOff = (1.0 - fdutyFactor) * LINE_PERIOD * ((float) bb.num50HzCycles);
   if (milliOn > (LINE_PERIOD * 0.2))
   {
     digitalWrite (ssrOnPin, HIGH);
     digitalWrite (ssrOnLed, HIGH);
   }
-  delay((unsigned long) milliOn);
+
+  tstart = millis();
+  tnow = tstart;
+  while ((tnow - tstart) < ((unsigned long) milliOn) )
+  {
+    ipoll = blinkyBus.poll();
+    if (ipoll == 2)
+    {
+      if (blinkyBus.getLastWriteAddress() == 1) favgDutyFactor = 0;
+      if (blinkyBus.getLastWriteAddress() == 7) resetTempMeas = true;
+    }
+    tnow = millis();
+  }
   digitalWrite (ssrOnPin, LOW);
   digitalWrite (ssrOnLed, LOW);
-  delay((unsigned long) milliOff);
-  return true;
+  tstart = millis();
+  tnow = tstart;
+  while ((tnow - tstart) < ((unsigned long) milliOff) )
+  {
+    ipoll = blinkyBus.poll();
+    if (ipoll == 2)
+    {
+      if (blinkyBus.getLastWriteAddress() == 1) favgDutyFactor = 0;
+      if (blinkyBus.getLastWriteAddress() == 7) resetTempMeas = true;
+    }
+    tnow = millis();
+  }  
 }
+
 float readTemp()
 {
   uint8_t  dataBufRead[4];
@@ -157,88 +187,4 @@ float readTemp()
   }
   fTemp = ((float) iTemp) * 0.25;
   return fTemp;
-}
-const int commLEDPin = 15;
-boolean commLED = true;
-
-struct TXinfo
-{
-  int cubeInit = 1;
-  int newSettingDone = 0;
-  int checkSum = CHECKSUM;
-};
-struct RXinfo
-{
-  int newSetting = 0;
-  int checkSum = CHECKSUM;
-};
-
-struct TX
-{
-  TXinfo txInfo;
-  TransmitData txData;
-};
-struct RX
-{
-  RXinfo rxInfo;
-  ReceiveData rxData;
-};
-TX tx;
-RX rx;
-ReceiveData settingsStorage;
-
-int sizeOfTx = 0;
-int sizeOfRx = 0;
-
-void setup()
-{
-  setupPins(&(tx.txData), &settingsStorage);
-  pinMode(commLEDPin, OUTPUT);  
-  digitalWrite(commLEDPin, commLED);
-
-  sizeOfTx = sizeof(tx);
-  sizeOfRx = sizeof(rx);
-  Serial1.begin(BAUD_RATE);
-  delay(1000);
-}
-void loop()
-{
-  boolean goodData = false;
-  goodData = processData(&(tx.txData), &settingsStorage);
-  if (goodData)
-  {
-    tx.txInfo.newSettingDone = 0;
-    if(Serial1.available() > 0)
-    { 
-      commLED = !commLED;
-      digitalWrite(commLEDPin, commLED);
-      Serial1.readBytes((uint8_t*)&rx, sizeOfRx);
-      
-      if (rx.rxInfo.checkSum == CHECKSUM)
-      {
-        if (rx.rxInfo.newSetting > 0)
-        {
-          processNewSetting(&(tx.txData), &settingsStorage, &(rx.rxData));
-          tx.txInfo.newSettingDone = 1;
-          tx.txInfo.cubeInit = 0;
-        }
-      }
-      else
-      {
-        Serial1.end();
-        for (int ii = 0; ii < 50; ++ii)
-        {
-          commLED = !commLED;
-          digitalWrite(commLEDPin, commLED);
-          delay(100);
-        }
-
-        Serial1.begin(BAUD_RATE);
-        tx.txInfo.newSettingDone = 0;
-        tx.txInfo.cubeInit = -1;
-      }
-    }
-    Serial1.write((uint8_t*)&tx, sizeOfTx);
-    Serial1.flush();
-  }
 }
