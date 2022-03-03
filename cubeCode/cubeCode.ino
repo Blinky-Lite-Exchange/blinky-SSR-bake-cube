@@ -115,8 +115,8 @@ void loop()
     favgDutyFactor = fdutyFactor;
   }
   bb.temp10 = (int16_t) (ftemp * 10);
-  bb.avgDutyFactor10 = (int16_t) (favgDutyFactor * 10);
-  bb.dutyFactor10 = (int16_t) (fdutyFactor * 10);
+  bb.avgDutyFactor10 = (int16_t) (favgDutyFactor * 10 * 100);
+  bb.dutyFactor10 = (int16_t) (fdutyFactor * 10 * 100);
   milliOn = fdutyFactor * LINE_PERIOD * ((float) bb.num50HzCycles);
   milliOff = (1.0 - fdutyFactor) * LINE_PERIOD * ((float) bb.num50HzCycles);
   if (milliOn > (LINE_PERIOD * 0.2))
